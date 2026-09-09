@@ -1,0 +1,188 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-sans-ui);
+  --font-mono: var(--font-mono-data);
+  --font-display: var(--font-display-serif);
+}
+
+/**
+ * Footer tokens — §3 of the footer brief.
+ *
+ * The brief's surfaces are lifts off its own ink-900 (#0A0A0A). This page sits
+ * on #030305, so the same lifts are re-added to this background rather than
+ * copied as literals, which is why the hex values differ from the brief's.
+ *
+ * The pc ramp is duplicated from lib/footer/field.ts, which is the authority
+ * for the canvas. Only pc-4 is referenced from CSS — the status marker.
+ */
+:root {
+  --color-pc-4: #afc0ff;
+
+  --color-footer-field: #222224; /* +31 on the background, as the brief has it */
+  --color-footer-field-focus: #2c2c2f;
+  --color-footer-mark: #19191b; /* +22 */
+  --color-footer-btn: #eeeeee;
+
+  --color-fg-muted: rgba(255, 255, 255, 0.46);
+  --color-fg-faint: rgba(255, 255, 255, 0.3);
+}
+
+html {
+  background: #030305;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: #030305;
+  color: #ffffff;
+  font-family: var(--font-sans-ui), system-ui, sans-serif;
+  /* Instrument Sans starts at 400; the old 300 has no cut in this family. */
+  font-weight: 400;
+  /* The pin does its own scroll maths; native smoothing would fight Lenis. */
+  scroll-behavior: auto;
+}
+
+/**
+ * Display type is the serif, everywhere a heading appears.
+ *
+ * Set here rather than per component because the headings are inline-styled in
+ * a dozen files and only ever declare size, weight and colour — leaving family
+ * as the one property with a single home. h3 is deliberately excluded: it runs
+ * at 15-19px, and this face needs more size than that to hold together.
+ */
+h1,
+h2 {
+  font-family: var(--font-display-serif), Georgia, "Times New Roman", serif;
+  font-weight: 400;
+}
+
+/**
+ * Footer form controls — §5 and §11.
+ *
+ * §5 asks for a lit background and a coloured bar on focus, with no ring. §11
+ * asks for a visible white outline. Those read as a contradiction but are not:
+ * the bar is the resting focus treatment, and the outline is added only for
+ * keyboard focus, where an unmistakable indicator is the accessibility floor.
+ */
+.footer-field {
+  width: 100%;
+  display: block;
+  background: var(--color-footer-field);
+  border: none;
+  border-radius: 0;
+  border-left: 2px solid transparent;
+  padding-inline: 12px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 400;
+  font-family: var(--font-sans-ui), system-ui, sans-serif;
+  outline: none;
+}
+
+.footer-field::placeholder {
+  color: var(--color-fg-muted);
+}
+
+.footer-field:focus {
+  background: var(--color-footer-field-focus);
+  border-left-color: var(--color-pc-4);
+}
+
+.footer-field:focus-visible {
+  outline: 1px solid #fff;
+  outline-offset: 2px;
+}
+
+.footer-submit {
+  width: 100%;
+  display: block;
+  background: var(--color-footer-btn);
+  color: #030305;
+  border: none;
+  border-radius: 0;
+  font-family: var(--font-mono-data), monospace;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: center;
+  cursor: pointer;
+}
+
+.footer-submit:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.footer-submit:focus-visible {
+  outline: 1px solid #fff;
+  outline-offset: 2px;
+}
+
+/**
+ * §6 — the two link groups differ by weight, not by a heading.
+ *
+ * The underline is permanent and faint, and only becomes white on hover. That
+ * is what separates these from the mono menu opposite them without adding a
+ * label to either column.
+ */
+.footer-thin {
+  color: #fff;
+  font-family: var(--font-sans-ui), system-ui, sans-serif;
+  text-decoration: underline;
+  text-decoration-color: var(--color-fg-faint);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 160ms;
+}
+
+.footer-thin:hover {
+  text-decoration-color: #fff;
+}
+
+/**
+ * §9 — sized so the word fills the section's width on its own.
+ *
+ * `transform: scaleX()` is ruled out by the brief, so the size is what does
+ * the filling. These values are measured against the eight letters of this
+ * wordmark; a different word needs them re-measured.
+ */
+.footer-wordmark {
+  font-family: var(--font-sans-ui), system-ui, sans-serif;
+  font-size: 17.1vw;
+}
+
+/* Present to a screen reader, absent from the picture. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Lenis needs the document to size normally while it drives the scroll. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+/* §14 — no flythrough, and nothing animates itself. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

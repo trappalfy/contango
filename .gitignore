@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+build
+.DS_Store
+*.pem
+.env*
+!.env.example
+next-env.d.ts
+.shots
+server.log
+page.html
+.data
+.tmp
+dev.log
+tsconfig.tsbuildinfo
