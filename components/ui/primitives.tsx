@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { C } from '@/lib/hero.tokens'
 
@@ -237,7 +238,7 @@ export function CtaLink({
       : { background: C.navBtnBg, color: C.navBtnText }
 
   return (
-    <a
+    <Link
       href={href}
       className="inline-flex items-center font-mono uppercase focus-visible:outline focus-visible:outline-1 focus-visible:outline-white"
       style={{
@@ -261,7 +262,7 @@ export function CtaLink({
           borderLeft: `4px solid ${variant === 'accent' ? '#fff' : C.navBtnText}`,
         }}
       />
-    </a>
+    </Link>
   )
 }
 

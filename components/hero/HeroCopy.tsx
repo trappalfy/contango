@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { Fragment, useEffect, useRef } from 'react'
 import {
   COPY_A_OPACITY,
@@ -100,7 +101,7 @@ export function HeroCopy() {
           <Lines lines={bBody} />
         </p>
 
-        <a
+        <Link
           href="/spread"
           className="mt-6 inline-flex items-center font-mono uppercase text-white transition-[filter] focus-visible:outline focus-visible:outline-1 focus-visible:outline-white"
           style={{
@@ -126,7 +127,7 @@ export function HeroCopy() {
               borderLeft: `4px solid ${C.textPrimary}`,
             }}
           />
-        </a>
+        </Link>
       </div>
     </div>
   )

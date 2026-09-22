@@ -92,14 +92,17 @@ export default function SpreadPage() {
               One side or the other, never both.
             </h2>
             <Body wide>
-              A rotation is a single swap. Capital leaves one leg and arrives in the other, in your
-              own wallet, in one transaction — there is no vault to deposit into and no position to
-              be liquidated out of.
+              Capital leaves one leg and arrives in the other, in your own wallet — there is no
+              vault to deposit into and no position to be liquidated out of. The swap is one
+              transaction; rotating a size you have not rotated before also needs a one-off
+              approval, because the router is only ever allowed to move that exact amount.
             </Body>
             <Body wide>
-              The form prices against live mid quotes and enforces your slippage tolerance. What it
-              cannot yet do is route: pool depth and price impact need an aggregator, and that is
-              the single remaining connection.
+              It is not, however, one hop. No pool pairs XOM against USO on this chain, so the
+              route goes through USDG and pays two sets of fees and two lots of depth. The form
+              prices that whole path against the pools that exist and shows the total as cost
+              against mid — not the quoted spread, which is a far smaller and far friendlier
+              number than the one you actually pay.
             </Body>
           </div>
 

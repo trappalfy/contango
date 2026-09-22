@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import { PageHeader } from '@/components/site/PageHeader'
 import { Body, Eyebrow, Panel, Row, Section } from '@/components/ui/primitives'
+import { ROUTING_CONFIGURED } from '@/lib/oneinch/client'
+import { RPC_IS_PUBLIC } from '@/lib/chain'
 
 export const metadata: Metadata = {
   title: 'Docs - Contango',
@@ -51,6 +53,14 @@ export default function DocsPage() {
               <Row label="/rhj/prices" value="All quotes, one request" />
               <Row label="/rhj/corporate-actions" value="Dividends and splits" />
               <Row label="Cache" value="20s quotes · 1h registry" />
+              <Row
+                label="Balances"
+                value={`Multicall onchain · ${RPC_IS_PUBLIC ? 'public RPC' : 'dedicated RPC'}`}
+              />
+              <Row label="Ratio history" value="Uniswap V4 swap events · ~3 days" />
+              {ROUTING_CONFIGURED && (
+                <Row label="Rotation" value="1inch on chain 4663 · XOM↔USDG↔USO" />
+              )}
             </div>
           </Panel>
 
@@ -62,10 +72,9 @@ export default function DocsPage() {
               Not wired up
             </h3>
             <div className="mt-5">
-              <Row label="Price history" value="Needs a market-data provider" />
               <Row label="Futures curve" value="Needs a commodity source" />
-              <Row label="Balances" value="Needs an RPC key" />
-              <Row label="Rotation" value="Needs a 1inch key" />
+              {!ROUTING_CONFIGURED && <Row label="Rotation" value="Needs a 1inch key" />}
+              <Row label="Direct XOM/USO pool" value="Does not exist on this chain" />
             </div>
           </Panel>
         </div>

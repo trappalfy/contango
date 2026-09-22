@@ -5,6 +5,7 @@ import { Nav } from '@/components/hero/Nav'
 import { Footer } from '@/components/site/Footer'
 import { Web3Provider } from '@/components/providers/Web3Provider'
 import { ToastProvider } from '@/components/ui/Toast'
+import { SITE_URL } from '@/lib/site'
 
 /**
  * Three faces, three jobs.
@@ -34,9 +35,26 @@ const dataMono = Azeret_Mono({
 })
 
 export const metadata: Metadata = {
+  // Without this, the generated Open Graph image stays a relative path and no
+  // crawler can resolve it.
+  metadataBase: new URL(SITE_URL),
   title: 'Contango - two ways to hold oil',
   description:
     'USO holds futures and pays to roll them forward. XOM sells the same barrel and pays a dividend. Contango tracks the gap and lets you rotate between them onchain.',
+  openGraph: {
+    type: 'website',
+    siteName: 'Contango',
+    url: SITE_URL,
+    title: 'Contango - two ways to hold oil',
+    description:
+      'One pays a dividend. The other pays to roll futures forward. A terminal for the XOM/USO pair on Robinhood Chain.',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Contango - two ways to hold oil',
+    description:
+      'One pays a dividend. The other pays to roll futures forward. A terminal for the XOM/USO pair on Robinhood Chain.',
+  },
 }
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {

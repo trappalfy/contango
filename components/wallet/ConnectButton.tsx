@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi'
 import { robinhoodChain } from '@/lib/chain'
 import { shortAddress } from '@/lib/tokens'
@@ -29,6 +29,7 @@ const buttonBase = {
 export function ConnectButton({ compact = false }: { compact?: boolean }) {
   const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   const { address, isConnected, chainId } = useAccount()
   const { connectors, connect, isPending, error } = useConnect()
@@ -40,6 +41,66 @@ export function ConnectButton({ compact = false }: { compact?: boolean }) {
   // The picker is derived, not synchronised: a live connection closes it by
   // definition, so there is no state to reset when one lands.
   const pickerOpen = open && !isConnected
+
+  /**
+   * What `aria-modal` promises, made true.
+   *
+   * Announcing a modal without trapping focus is worse than not announcing
+   * one: a screen reader is told the rest of the page is inert while Tab
+   * happily walks straight out of it. So Escape closes, Tab cycles inside the
+   * panel, focus moves in on open and returns to where it came from on close.
+   */
+  useEffect(() => {
+    if (!pickerOpen) return
+
+    const panel = panelRef.current
+    if (!panel) return
+
+    const previous = document.activeElement as HTMLElement | null
+    const focusable = () =>
+      Array.from(
+        panel.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      )
+
+    focusable()[0]?.focus()
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        setOpen(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const items = focusable()
+      if (items.length === 0) return
+
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement
+
+      // Wrap at both ends, and pull focus back in if it has already escaped.
+      if (event.shiftKey && (active === first || !panel.contains(active))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (active === last || !panel.contains(active))) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    const scrollLock = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = scrollLock
+      previous?.focus?.()
+    }
+  }, [pickerOpen])
 
   if (!mounted) {
     return (
@@ -121,6 +182,7 @@ export function ConnectButton({ compact = false }: { compact?: boolean }) {
           onClick={() => setOpen(false)}
         >
           <div
+            ref={panelRef}
             onClick={(e) => e.stopPropagation()}
             style={{
               width: 'min(420px, 100%)',

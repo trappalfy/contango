@@ -71,7 +71,7 @@ export function Nav() {
           aria-label="Main"
         >
           {nav.map((item) => (
-            <a
+            <Link
               key={item}
               href={`/${item.toLowerCase()}`}
               className="font-mono uppercase transition-colors duration-[160ms] hover:text-white focus-visible:outline focus-visible:outline-1 focus-visible:outline-white"
@@ -83,12 +83,12 @@ export function Nav() {
               }}
             >
               {item}
-            </a>
+            </Link>
           ))}
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
-          <a
+          <Link
             href="/spread"
             className="hidden font-mono uppercase transition-colors md:inline-block focus-visible:outline focus-visible:outline-1 focus-visible:outline-white"
             style={{
@@ -104,7 +104,7 @@ export function Nav() {
             onMouseLeave={(e) => (e.currentTarget.style.background = C.navBtnBg)}
           >
             {navCta}
-          </a>
+          </Link>
 
           <button
             type="button"
@@ -141,7 +141,7 @@ export function Nav() {
 
           <nav className="mt-12 flex flex-col gap-6" aria-label="Main">
             {nav.map((item) => (
-              <a
+              <Link
                 key={item}
                 href={`/${item.toLowerCase()}`}
                 onClick={() => setOpen(false)}
@@ -149,9 +149,9 @@ export function Nav() {
                 style={{ fontSize: '16px', letterSpacing: '.14em' }}
               >
                 {item}
-              </a>
+              </Link>
             ))}
-            <a
+            <Link
               href="/spread"
               onClick={() => setOpen(false)}
               className="mt-4 self-start font-mono uppercase"
@@ -164,7 +164,7 @@ export function Nav() {
               }}
             >
               {navCta}
-            </a>
+            </Link>
           </nav>
         </div>
       )}

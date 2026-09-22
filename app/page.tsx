@@ -38,7 +38,7 @@ const STEPS = [
   {
     n: '02',
     title: 'Take one side',
-    body: 'Capital sits in XOM or in USO, never both. Rotation is a single swap routed through 1inch on Robinhood Chain.',
+    body: 'Capital sits in XOM or in USO, never both. There is no pool between them, so the swap routes through USDG — and you see both legs of the cost before you sign.',
   },
   {
     n: '03',

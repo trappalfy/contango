@@ -108,12 +108,12 @@ export default function PortfolioPage() {
 
         <div className="mt-12 grid gap-4 md:grid-cols-2">
           <Panel>
-            <Eyebrow>1 · The permit</Eyebrow>
+            <Eyebrow>1 · The allowance</Eyebrow>
             <p style={{ fontSize: 13, lineHeight: 1.6, color: 'rgba(255,255,255,0.62)', marginTop: 14 }}>
-              A signature, not a transaction. It costs nothing, sends nothing, and authorises the
-              router to move exactly the amount you entered, expiring in twenty minutes. These
-              tokens implement EIP-2612 — verified against the contracts — so no separate approval
-              transaction is needed, which is why a rotation stays a single transaction.
+              The router is authorised to move exactly the amount you entered, and nothing beyond
+              it. That is a deliberate choice against the usual unlimited approval: it costs a
+              second signature the first time you rotate a given size, and it leaves no standing
+              claim on your position in a contract we do not control.
             </p>
           </Panel>
 
