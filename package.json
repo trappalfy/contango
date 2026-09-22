@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --test --experimental-strip-types \"lib/*.test.ts\"",
-    "check:routing": "node scripts/check-routing.mjs"
+    "check:rotation": "node scripts/simulate-rotation.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",
