@@ -17,7 +17,6 @@ import {
   FAILURE_COPY,
   PRICE_IMPACT_SEVERE_BPS,
   PRICE_IMPACT_WARN_BPS,
-  ROUTING_READY,
   isBusy,
 } from '@/lib/swap/execution'
 
@@ -193,7 +192,10 @@ export function RotateForm() {
     if (visibleError) return { kind: 'disabled' as const, label: 'Cannot price this' }
     if (!visibleQuote) return { kind: 'disabled' as const, label: 'No quote' }
     if (busy) return { kind: 'disabled' as const, label: 'Rotation in progress' }
-    if (!ROUTING_READY || visibleQuote.source === 'indicative') {
+    // A routed quote is the proof that routing works. An indicative one is
+    // mid-price arithmetic that understates the real cost, so it is shown but
+    // never traded on.
+    if (visibleQuote.source === 'indicative') {
       return { kind: 'blocked' as const, label: 'Routing not connected' }
     }
     if (impactTone === 'severe') {
@@ -206,7 +208,10 @@ export function RotateForm() {
     if (!amountWei) return
     void start({
       from: direction.from,
+      to: direction.to,
       amount,
+      slippage,
+      expectedOut: visibleQuote?.amountOut ?? null,
       onSettled: (settled) => {
         if (settled.kind === 'confirmed') {
           toast({
@@ -369,9 +374,17 @@ export function RotateForm() {
           { label: 'Rate', value: visibleQuote ? `1 ${direction.from} = ${visibleQuote.ratio} ${direction.to}` : '—' },
           { label: 'Spread cost', value: visibleQuote ? `${visibleQuote.spreadBps.toFixed(1)} bps` : '—' },
           {
-            label: 'Price impact',
+            label: 'Cost vs mid',
             value: impactBps != null ? `${impactBps.toFixed(1)} bps` : 'Not priced',
             tone: impactTone,
+          },
+          {
+            // There is no XOM/USO pool, so a rotation always goes through USDG.
+            // Saying so is the difference between one swap and one hop.
+            label: 'Route',
+            value: visibleQuote?.route?.length
+              ? `${direction.from} → ${visibleQuote.via ?? direction.to}${visibleQuote.via ? ` → ${direction.to}` : ''} · ${visibleQuote.route.join(', ')}`
+              : '—',
           },
           { label: `Min received (${slippage}%)`, value: minReceived ? `${minReceived} ${direction.to}` : '—' },
         ].map((row) => (
@@ -496,11 +509,7 @@ export function RotateForm() {
             marginTop: 14,
           }}
         >
-          {visibleQuote.note} Everything above is live — the only missing piece is the aggregator call in{' '}
-          <span className="font-mono" style={{ color: 'rgba(255,255,255,0.62)' }}>
-            app/api/quote/route.ts
-          </span>{' '}
-          and the swap transaction it returns.
+          {visibleQuote.note}
         </p>
       )}
     </Panel>

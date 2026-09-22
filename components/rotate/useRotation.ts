@@ -1,61 +1,41 @@
 'use client'
 
 import { useCallback, useRef, useState } from 'react'
-import { parseUnits, type Address } from 'viem'
+import { decodeEventLog, parseAbiItem, parseUnits, formatUnits, type Address, type Hex } from 'viem'
 import { useAccount, useConfig } from 'wagmi'
-import { readContract, signTypedData, waitForTransactionReceipt, writeContract } from 'wagmi/actions'
+import { readContract, sendTransaction, waitForTransactionReceipt, writeContract } from 'wagmi/actions'
 import { robinhoodChain } from '@/lib/chain'
 import { TOKENS, erc20Abi, type TokenSymbol } from '@/lib/tokens'
-import {
-  ROUTER_ADDRESS,
-  ROUTING_READY,
-  classifyError,
-  type TxPhase,
-} from '@/lib/swap/execution'
+import { classifyError, type TxPhase } from '@/lib/swap/execution'
+import type { SwapPlan, SwapResponse } from '@/lib/swap/types'
 
-const permitAbi = [
-  {
-    type: 'function',
-    name: 'nonces',
-    stateMutability: 'view',
-    inputs: [{ name: 'owner', type: 'address' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    type: 'function',
-    name: 'name',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{ name: '', type: 'string' }],
-  },
-] as const
-
-const PERMIT_TYPES = {
-  Permit: [
-    { name: 'owner', type: 'address' },
-    { name: 'spender', type: 'address' },
-    { name: 'value', type: 'uint256' },
-    { name: 'nonce', type: 'uint256' },
-    { name: 'deadline', type: 'uint256' },
-  ],
-} as const
-
-const DEADLINE_SECONDS = 20 * 60
+const transferEvent = parseAbiItem(
+  'event Transfer(address indexed from, address indexed to, uint256 value)',
+)
 
 export type StartArgs = {
   from: TokenSymbol
+  to: TokenSymbol
   amount: string
+  /** Tolerance in percent, as the form presents it. */
+  slippage: number
+  /** The output the person was looking at when they committed, in tokens. */
+  expectedOut: string | null
   /** Called once the run reaches a terminal phase, so callers can notify. */
   onSettled?: (phase: TxPhase) => void
 }
 
 /**
- * Drives a rotation from signature to receipt.
+ * Drives a rotation from plan to receipt.
  *
- * The whole sequence is implemented; only the aggregator's spender and
- * calldata are missing, so `start` stops at a single, clearly-labelled point
- * when routing is not configured. Wiring that in does not change any state
- * below it.
+ * The sequence is: ask the server for executable calldata, make sure the
+ * aggregator's spender can move the input token, send the swap, then read back
+ * what actually arrived rather than reporting what was promised.
+ *
+ * Allowance is granted for exactly the amount being rotated. An unlimited
+ * approval would spare the occasional second signature, but it leaves a
+ * standing claim on someone's position in a contract this app does not
+ * control, and that is not a trade worth making for one click.
  */
 export function useRotation() {
   const [phase, setPhase] = useState<TxPhase>({ kind: 'idle' })
@@ -69,7 +49,7 @@ export function useRotation() {
   }, [])
 
   const start = useCallback(
-    async ({ from, amount, onSettled }: StartArgs) => {
+    async ({ from, to, amount, slippage, expectedOut, onSettled }: StartArgs) => {
       const id = ++runId.current
       const settle = (next: TxPhase) => {
         // A cancelled or superseded run must never write over a newer one.
@@ -83,66 +63,93 @@ export function useRotation() {
         return
       }
 
-      if (!ROUTING_READY) {
-        settle({ kind: 'failed', reason: 'router-not-configured' })
-        return
-      }
-
       const token = TOKENS[from]
-      const spender = ROUTER_ADDRESS as Address
+      const target = TOKENS[to]
       const value = parseUnits(amount, token.decimals)
-      const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
 
       try {
+        /* --- 1. the plan ------------------------------------------------ */
         settle({ kind: 'permit' })
 
-        const [name, nonce] = await Promise.all([
-          readContract(config, {
-            address: token.address,
-            abi: permitAbi,
-            functionName: 'name',
-            chainId: robinhoodChain.id,
-          }),
-          readContract(config, {
-            address: token.address,
-            abi: permitAbi,
-            functionName: 'nonces',
-            args: [address],
-            chainId: robinhoodChain.id,
-          }),
-        ])
-
-        // The tokens expose DOMAIN_SEPARATOR() but not version(); '1' is the
-        // EIP-2612 default. Before going live, compare the domain built here
-        // against the contract's own separator and fall back to `approve` if
-        // they disagree, rather than sending a signature that cannot verify.
-        await signTypedData(config, {
-          domain: {
-            name: name as string,
-            version: '1',
-            chainId: robinhoodChain.id,
-            verifyingContract: token.address,
-          },
-          types: PERMIT_TYPES,
-          primaryType: 'Permit',
-          message: {
-            owner: address,
-            spender,
-            value,
-            nonce: nonce as bigint,
-            deadline,
-          },
+        const response = await fetch('/api/swap', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ from, to, amount, wallet: address, slippage }),
         })
+        const payload = (await response.json()) as SwapResponse
 
-        settle({ kind: 'swap' })
+        if (!payload.ok) {
+          settle({
+            kind: 'failed',
+            reason: response.status === 501 ? 'router-not-configured' : 'unknown',
+            detail: payload.error,
+          })
+          return
+        }
 
-        // The routed quote carries the calldata to send here. Until it does,
-        // the run cannot proceed past this point.
-        const hash = await writeContract(config, {
+        const plan: SwapPlan = payload.plan
+
+        /* --- 1b. did the price move under them? -------------------------- */
+        //
+        // The quote on screen was priced seconds ago; this plan is priced now.
+        // Slippage protects the transaction once it is sent, but it does not
+        // protect someone from signing a materially worse trade than the one
+        // they read. So the gap is checked before the wallet ever opens.
+        if (expectedOut) {
+          const promised = parseUnits(expectedOut, target.decimals)
+          const actual = BigInt(plan.amountOut)
+          const floor = promised - (promised * BigInt(Math.round(slippage * 100))) / 10_000n
+
+          if (promised > 0n && actual < floor) {
+            settle({
+              kind: 'failed',
+              reason: 'quote-moved',
+              detail: `Quoted ${expectedOut}, routable ${formatUnits(actual, target.decimals)}.`,
+            })
+            return
+          }
+        }
+
+        /* --- 2. allowance ----------------------------------------------- */
+        const allowance = (await readContract(config, {
           address: token.address,
           abi: erc20Abi,
-          functionName: 'approve',
-          args: [spender, value],
+          functionName: 'allowance',
+          args: [address, plan.spender],
+          chainId: robinhoodChain.id,
+        })) as bigint
+
+        if (allowance < value) {
+          settle({ kind: 'approve' })
+
+          const approvalHash = await writeContract(config, {
+            address: token.address,
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [plan.spender, value],
+            chainId: robinhoodChain.id,
+          })
+
+          settle({ kind: 'approve-pending', hash: approvalHash })
+
+          const approval = await waitForTransactionReceipt(config, {
+            hash: approvalHash,
+            chainId: robinhoodChain.id,
+          })
+
+          if (approval.status === 'reverted') {
+            settle({ kind: 'failed', reason: 'reverted', hash: approvalHash, detail: 'The approval reverted.' })
+            return
+          }
+        }
+
+        /* --- 3. the swap ------------------------------------------------ */
+        settle({ kind: 'swap' })
+
+        const hash = await sendTransaction(config, {
+          to: plan.to,
+          data: plan.data,
+          value: BigInt(plan.value),
           chainId: robinhoodChain.id,
         })
 
@@ -158,7 +165,12 @@ export function useRotation() {
           return
         }
 
-        settle({ kind: 'confirmed', hash, received: null })
+        /* --- 4. what actually arrived ------------------------------------ */
+        settle({
+          kind: 'confirmed',
+          hash,
+          received: receivedAmount(receipt.logs, target.address, address, target.decimals),
+        })
       } catch (error) {
         const { reason, detail } = classifyError(error)
         settle({ kind: 'failed', reason, detail })
@@ -168,4 +180,38 @@ export function useRotation() {
   )
 
   return { phase, start, reset }
+}
+
+/**
+ * Reads the credited amount out of the receipt.
+ *
+ * Reporting the quote back as though it were the fill is how an interface ends
+ * up lying by a few basis points every time. The transfer into the wallet is
+ * the only number that happened.
+ */
+function receivedAmount(
+  logs: readonly { address: string; topics: readonly string[]; data: string }[],
+  token: Address,
+  wallet: Address,
+  decimals: number,
+): string | null {
+  let total = 0n
+
+  for (const log of logs) {
+    if (log.address.toLowerCase() !== token.toLowerCase()) continue
+    try {
+      const decoded = decodeEventLog({
+        abi: [transferEvent],
+        data: log.data as Hex,
+        topics: log.topics as [Hex, ...Hex[]],
+      })
+      if (decoded.args.to.toLowerCase() === wallet.toLowerCase()) {
+        total += decoded.args.value
+      }
+    } catch {
+      // Not a Transfer, or not one this ABI can read. Skip it.
+    }
+  }
+
+  return total > 0n ? formatUnits(total, decimals) : null
 }

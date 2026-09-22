@@ -4,7 +4,7 @@ import { explorerTx } from '@/lib/chain'
 import { FAILURE_COPY, isAwaitingSignature, isInFlight, type TxPhase } from '@/lib/swap/execution'
 import { HAIRLINE } from '@/components/ui/primitives'
 
-const STEPS = ['Permit', 'Swap', 'Confirmed'] as const
+const STEPS = ['Route', 'Swap', 'Confirmed'] as const
 
 /** Which of the three steps the current phase sits on. */
 function stepIndex(phase: TxPhase): number {
@@ -27,13 +27,13 @@ function headline(phase: TxPhase): { title: string; body: string } {
   switch (phase.kind) {
     case 'permit':
       return {
-        title: 'Sign the permit',
-        body: 'Approve the spend in your wallet. This is a signature, not a transaction — it costs nothing and sends nothing.',
+        title: 'Building the route',
+        body: 'Pricing the rotation against the pools that exist. Nothing has been sent to your wallet yet.',
       }
     case 'approve':
       return {
         title: 'Approve the token',
-        body: 'This token could not take a permit, so the allowance needs a transaction of its own. Confirm it in your wallet.',
+        body: 'The router needs permission to move exactly this amount. Confirm it in your wallet — the allowance is for this rotation only, not an open-ended one.',
       }
     case 'approve-pending':
       return { title: 'Approval in flight', body: 'Waiting for the allowance to land before the swap goes out.' }

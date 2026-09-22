@@ -1,13 +1,17 @@
-import type { Address, Hex } from 'viem'
+import type { Hex } from 'viem'
 
 /**
  * The transaction lifecycle for a rotation.
  *
- * The tokens implement EIP-2612 (verified on chain: DOMAIN_SEPARATOR() and
- * nonces() both answer), so the happy path is one off-chain signature followed
- * by one transaction. `approve` exists only as a fallback for a spender or
- * token that cannot take a permit — which is why the product can honestly keep
- * saying a rotation is a single transaction.
+ * The swap itself is one transaction. It is preceded by an approval whenever
+ * the router cannot already move the amount being rotated, because the
+ * allowance is granted per-amount rather than left standing — so someone
+ * rotating a new size signs twice, and someone repeating a size signs once.
+ *
+ * All three tokens do implement EIP-2612 (verified on chain: the computed
+ * domain matches DOMAIN_SEPARATOR() at version "1"), so a permit could fold
+ * the approval into the swap later. That is a change to how the allowance is
+ * carried, not to anything below.
  */
 export type TxPhase =
   | { kind: 'idle' }
@@ -26,6 +30,7 @@ export type FailureReason =
   | 'reverted'
   | 'insufficient'
   | 'router-not-configured'
+  | 'quote-moved'
   | 'unknown'
 
 export const FAILURE_COPY: Record<FailureReason, { title: string; body: string }> = {
@@ -52,6 +57,10 @@ export const FAILURE_COPY: Record<FailureReason, { title: string; body: string }
   'router-not-configured': {
     title: 'Routing not connected',
     body: 'This build has no aggregator credentials, so there is no route to execute against. Everything up to this point is live.',
+  },
+  'quote-moved': {
+    title: 'The price moved while you were deciding',
+    body: 'The executable route came back worse than the quote on screen by more than your slippage tolerance, so nothing was sent. The figures have refreshed — look again and decide on the new ones.',
   },
   unknown: {
     title: 'Something went wrong',
@@ -105,18 +114,16 @@ export function classifyError(error: unknown): { reason: FailureReason; detail?:
 }
 
 /**
- * ---------------------------------------------------------------------------
- * THE REMAINING SEAM
+ * The spender is never configured here.
  *
- * A rotation needs a spender to permit and calldata to send. Both come from
- * the aggregator, so both arrive with the routed quote from /api/quote.
- * Set NEXT_PUBLIC_ROUTER_ADDRESS once that is wired and the state machine
- * below runs end to end without further changes.
- * ---------------------------------------------------------------------------
+ * It arrives with the swap plan from `/api/swap`, which reads it from the
+ * aggregator itself. A router address pinned in configuration is a liability:
+ * the day the aggregator migrates one, every approval the app has ever issued
+ * points at a contract that no longer executes, and the failure is silent.
+ *
+ * Whether routing works at all is likewise not a build-time flag — it is
+ * visible in the data, because a quote that came back `routed` proves it.
  */
-export const ROUTER_ADDRESS = (process.env.NEXT_PUBLIC_ROUTER_ADDRESS ?? '') as Address | ''
-
-export const ROUTING_READY = ROUTER_ADDRESS.length === 42
 
 /** Price impact above this is worth a warning rather than a number. */
 export const PRICE_IMPACT_WARN_BPS = 100
