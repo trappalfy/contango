@@ -110,10 +110,15 @@ export default function PortfolioPage() {
           <Panel>
             <Eyebrow>1 · The allowance</Eyebrow>
             <p style={{ fontSize: 13, lineHeight: 1.6, color: 'rgba(255,255,255,0.62)', marginTop: 14 }}>
-              The router is authorised to move exactly the amount you entered, and nothing beyond
-              it. That is a deliberate choice against the usual unlimited approval: it costs a
-              second signature the first time you rotate a given size, and it leaves no standing
-              claim on your position in a contract we do not control.
+              Permission comes in two parts. Once ever, the token is approved to Permit2 — the
+              canonical contract every Uniswap route goes through. Your wallet will call that one
+              unlimited, and it is: Permit2 can hold the permission, but it cannot move anything
+              without the second part.
+            </p>
+            <p style={{ fontSize: 13, lineHeight: 1.6, color: 'rgba(255,255,255,0.62)', marginTop: 14 }}>
+              The second part is a signature, not a transaction. It names the router, the exact
+              amount you entered, and half an hour. It costs nothing, and when the rotation lands
+              there is no standing claim left on your position.
             </p>
           </Panel>
 

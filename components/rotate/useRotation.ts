@@ -23,7 +23,6 @@ import { TOKENS, erc20Abi, type TokenSymbol } from '@/lib/tokens'
 import { classifyError, type TxPhase } from '@/lib/swap/execution'
 import { V4 } from '@/lib/v4/config'
 import {
-  MAX_UINT160,
   buildPermitSingle,
   buildRotationCall,
   permit2Abi,
@@ -53,11 +52,17 @@ export type StartArgs = {
 /**
  * Drives a rotation from quote to receipt.
  *
- * Tokens reach the router through Permit2, which splits permission in two: a
- * single lifetime approval from the token to Permit2, then a signature naming
- * the router. The approval is a transaction and happens once ever; the
- * signature is free, lasts thirty days, and travels inside the swap. So the
- * first rotation costs two sends and every one after it costs one.
+ * Tokens reach the router through Permit2, which splits permission in two.
+ *
+ * The first half is an approval from the token to Permit2 itself. It is a
+ * transaction, it happens once ever, and it is unlimited — which is safe only
+ * because Permit2 cannot move anything on its own: it is a gate, and the
+ * second half is the key.
+ *
+ * The second half is a signature naming the router, for this amount, expiring
+ * in half an hour. It is free, it travels inside the swap, and it leaves no
+ * claim behind once the transaction lands. So the first rotation costs two
+ * sends and every one after it costs one.
  *
  * Nothing is built on the server. The calldata is pure encoding over public
  * addresses, so it is assembled here where it can be read.
@@ -155,7 +160,7 @@ export function useRotation() {
         let permit: { single: ReturnType<typeof buildPermitSingle>; signature: Hex } | undefined
 
         if (!standing) {
-          const single = buildPermitSingle(token.address, Number(nonce))
+          const single = buildPermitSingle(token.address, Number(nonce), amountIn)
           const signature = await signTypedData(config, {
             domain: permit2Domain,
             types: permit2Types,
@@ -240,4 +245,3 @@ function receivedAmount(
   return total > 0n ? formatUnits(total, decimals) : null
 }
 
-export { MAX_UINT160 }

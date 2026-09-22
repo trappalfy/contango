@@ -108,22 +108,37 @@ export const permit2Types = {
   ],
 } as const
 
-/** Thirty days of standing permission, renewed by signature, not by a send. */
-export const PERMIT_EXPIRY_SECONDS = 30 * 24 * 60 * 60
+/**
+ * The permit covers this rotation and then lapses.
+ *
+ * Long-lived or unlimited permissions are the norm here, and the usual defence
+ * is that a Permit2 allowance expires on its own. That is true and still not a
+ * reason to ask for one: this signature is free and off-chain, so requesting
+ * exactly the amount being rotated costs a person nothing and leaves the
+ * router with no claim once the transaction lands.
+ *
+ * It also means the wallet shows the real figure. A dialog reading "unlimited"
+ * next to a page promising the opposite is how trust goes.
+ */
+export const PERMIT_EXPIRY_SECONDS = 30 * 60
 /** The signature itself is only good for half an hour. */
 export const SIG_DEADLINE_SECONDS = 30 * 60
 /** Permit2 stores allowances in 160 bits. */
 export const MAX_UINT160 = (1n << 160n) - 1n
 
-export function buildPermitSingle(token: Address, nonce: number, now = Date.now()): PermitSingle {
+export function buildPermitSingle(
+  token: Address,
+  nonce: number,
+  amount: bigint,
+  now = Date.now(),
+): PermitSingle {
   const seconds = Math.floor(now / 1000)
   return {
     details: {
       token,
-      // Permit2 allowances expire on their own, which is what makes a
-      // generous amount reasonable here: it lapses whether or not anyone
-      // remembers to revoke it.
-      amount: MAX_UINT160,
+      // Permit2 stores this in 160 bits; no rotation comes close, but a value
+      // that would silently wrap must not be signed.
+      amount: amount > MAX_UINT160 ? MAX_UINT160 : amount,
       expiration: seconds + PERMIT_EXPIRY_SECONDS,
       nonce,
     },
