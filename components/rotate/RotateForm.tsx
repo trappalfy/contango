@@ -192,11 +192,11 @@ export function RotateForm() {
     if (visibleError) return { kind: 'disabled' as const, label: 'Cannot price this' }
     if (!visibleQuote) return { kind: 'disabled' as const, label: 'No quote' }
     if (busy) return { kind: 'disabled' as const, label: 'Rotation in progress' }
-    // A routed quote is the proof that routing works. An indicative one is
-    // mid-price arithmetic that understates the real cost, so it is shown but
-    // never traded on.
+    // A routed quote came from the pools themselves. An indicative one means
+    // the chain read failed: it is mid-price arithmetic, it understates the
+    // real cost, and it is shown but never traded on.
     if (visibleQuote.source === 'indicative') {
-      return { kind: 'blocked' as const, label: 'Routing not connected' }
+      return { kind: 'blocked' as const, label: 'Pools unreachable' }
     }
     if (impactTone === 'severe') {
       return { kind: 'ready' as const, label: `Rotate anyway — ${(impactBps! / 100).toFixed(2)}% impact` }
@@ -211,7 +211,7 @@ export function RotateForm() {
       to: direction.to,
       amount,
       slippage,
-      expectedOut: visibleQuote?.amountOut ?? null,
+      expectedOutWei: visibleQuote?.amountOutWei ?? null,
       onSettled: (settled) => {
         if (settled.kind === 'confirmed') {
           toast({

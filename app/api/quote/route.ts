@@ -4,12 +4,8 @@ import { findBySymbol, getAssets, getQuotes } from '@/lib/rh/client'
 import { PAIR, buildLeg } from '@/lib/pair'
 import { div, formatDec, mul, parseDec } from '@/lib/decimal'
 import { TOKENS, type TokenSymbol } from '@/lib/tokens'
-import {
-  ROUTING_CONFIGURED,
-  fetchQuote,
-  routeHops,
-  routeNames,
-} from '@/lib/oneinch/client'
+import { LiquidityError, quoteRotation } from '@/lib/v4/quote'
+import { VENUE, VIA } from '@/lib/v4/config'
 import type { QuoteResponse, RotationQuote } from '@/lib/swap/types'
 
 export const dynamic = 'force-dynamic'
@@ -17,17 +13,16 @@ export const dynamic = 'force-dynamic'
 const SUPPORTED: TokenSymbol[] = ['XOM', 'USO']
 
 /**
- * Prices a rotation between the two legs.
+ * Prices a rotation.
  *
- * Two prices are produced from the same request. The mid-price arithmetic on
- * Robinhood's feed gives the ratio and, more usefully, a reference to measure
- * against. 1inch gives what the swap would actually return against the pools
- * that exist. The gap between them is the real cost of the rotation, and it is
- * reported as `priceImpactBps` rather than buried.
+ * Two numbers come out of one request. Robinhood's feed gives the mid-price
+ * ratio, which is the reference. The v4 Quoter walks the actual curve and
+ * gives what the swap returns, fees and depth included. The gap between them
+ * is the true cost, reported rather than buried.
  *
- * When no key is configured the indicative number still goes out, clearly
- * labelled, because the rest of the interface is built on it — but it is never
- * executable, and the form refuses to trade on it.
+ * Quoting reads the chain directly, so it needs no key and cannot be rate
+ * limited by anyone. If the chain read fails the mid-price arithmetic still
+ * goes out, clearly labelled — and the form will not trade on it.
  */
 export async function POST(request: Request): Promise<NextResponse<QuoteResponse>> {
   let body: unknown
@@ -71,11 +66,7 @@ export async function POST(request: Request): Promise<NextResponse<QuoteResponse
     const [assets, quotes] = await Promise.all([getAssets(), getQuotes()])
 
     const legs = {
-      XOM: buildLeg(
-        PAIR.equity,
-        findBySymbol(assets.data, 'XOM'),
-        findBySymbol(quotes.data, 'XOM'),
-      ),
+      XOM: buildLeg(PAIR.equity, findBySymbol(assets.data, 'XOM'), findBySymbol(quotes.data, 'XOM')),
       USO: buildLeg(PAIR.fund, findBySymbol(assets.data, 'USO'), findBySymbol(quotes.data, 'USO')),
     }
 
@@ -93,74 +84,54 @@ export async function POST(request: Request): Promise<NextResponse<QuoteResponse
       )
     }
 
-    // Mid to mid, before any cost. This is the reference, not an offer.
+    // Mid to mid, before any cost. A reference, not an offer.
     const ratio = div(source.tokenPrice, target.tokenPrice)
     const spreadBps = source.spreadBps + target.spreadBps
     const midOut = mul(parseDec(amount), ratio)
 
-    if (ROUTING_CONFIGURED) {
-      try {
-        const routed = await fetchQuote({
-          src: src.address,
-          dst: dst.address,
-          amount: amountInWei.toString(),
-        })
+    try {
+      const routed = await quoteRotation(from as TokenSymbol, to as TokenSymbol, amountInWei)
+      const out = parseDec(formatUnits(routed.amountOut, dst.decimals))
+      const shortfall = midOut > 0n ? Number(((midOut - out) * 10_000n) / midOut) : 0
 
-        const out = parseDec(formatUnits(BigInt(routed.dstAmount), dst.decimals))
-        // How far the achievable output falls short of the mid-price value of
-        // the input: pool fees and depth together, in one honest number.
-        const shortfall = midOut > 0n ? Number(((midOut - out) * 10_000n) / midOut) : 0
-        const hops = routeHops(routed.protocols)
-
-        const quote: RotationQuote = {
-          source: 'routed',
-          from: from as TokenSymbol,
-          to: to as TokenSymbol,
-          amountIn: amount,
-          amountOut: formatDec(out, Math.min(8, dst.decimals)),
-          ratio: formatDec(ratio, 8),
-          spreadBps,
-          priceImpactBps: shortfall,
-          route: routeNames(routed.protocols),
-          hops,
-          via: hops > 1 ? TOKENS.USDG.symbol : undefined,
-          estimatedGas: routed.gas,
-        }
-
-        return NextResponse.json({ ok: true, quote })
-      } catch (error) {
-        // Fall through to the indicative price rather than blanking the panel.
-        // The label is what keeps this honest: the form will not trade on it.
-        const detail = error instanceof Error ? error.message : 'aggregator unavailable'
-        return NextResponse.json({
-          ok: true,
-          quote: indicative(
-            from as TokenSymbol,
-            to as TokenSymbol,
-            amount,
-            midOut,
-            ratio,
-            spreadBps,
-            dst.decimals,
-            `Routed pricing is unavailable right now (${detail}). This is mid-price arithmetic and understates the real cost.`,
-          ),
-        })
-      }
-    }
-
-    return NextResponse.json({
-      ok: true,
-      quote: indicative(
-        from as TokenSymbol,
-        to as TokenSymbol,
-        amount,
-        midOut,
-        ratio,
+      const quote: RotationQuote = {
+        source: 'routed',
+        from: from as TokenSymbol,
+        to: to as TokenSymbol,
+        amountIn: amount,
+        amountOut: formatDec(out, Math.min(8, dst.decimals)),
+        amountOutWei: routed.amountOut.toString(),
+        ratio: formatDec(ratio, 8),
         spreadBps,
-        dst.decimals,
-        'Mid-price arithmetic. There is no direct XOM/USO pool, so a real rotation crosses two pools via USDG and costs materially more than this. Connect an aggregator key for an executable price.',
-      ),
-    })
+        priceImpactBps: shortfall,
+        route: [VENUE],
+        hops: 2,
+        via: VIA,
+        estimatedGas: Number(routed.gasEstimate),
+      }
+
+      return NextResponse.json({ ok: true, quote })
+    } catch (error) {
+      // A size the pools cannot fill is a real answer, not a fault. Saying so
+      // beats showing a mid-price number nobody could have traded on.
+      if (error instanceof LiquidityError) {
+        return NextResponse.json({ ok: false, error: error.message }, { status: 409 })
+      }
+
+      return NextResponse.json({
+        ok: true,
+        quote: indicative(
+          from as TokenSymbol,
+          to as TokenSymbol,
+          amount,
+          midOut,
+          ratio,
+          spreadBps,
+          dst.decimals,
+          'Could not reach the pools just now, so this is mid-price arithmetic. It understates the real cost and is not executable.',
+        ),
+      })
+    }
   } catch {
     return NextResponse.json(
       { ok: false, error: 'Could not reach the quote feed. It rate-limits hard; try again shortly.' },

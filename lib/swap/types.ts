@@ -28,6 +28,8 @@ export type RotationQuote = {
   amountIn: string
   /** Expected output, in the to-token's own decimals. */
   amountOut: string
+  /** The same figure in base units, which is what slippage is applied to. */
+  amountOutWei?: string
   /** Mid-price ratio used, as a decimal string. */
   ratio: string
   /** Half-spread on each leg, the unavoidable cost of crossing. */
@@ -60,29 +62,3 @@ export type QuoteRequest = {
   amount: string
 }
 
-/**
- * The executable half: everything needed to put a rotation on chain.
- *
- * Kept separate from the quote because it costs a second aggregator call, is
- * specific to one wallet, and goes stale in seconds — so it is fetched when
- * someone commits, not while they are still typing.
- */
-export type SwapPlan = {
-  /** The contract to permit and to send the transaction to. */
-  spender: `0x${string}`
-  to: `0x${string}`
-  data: `0x${string}`
-  value: string
-  gas?: number
-  /** Expected output in base units, before slippage. */
-  amountOut: string
-  /** The least the swap may deliver before it reverts, in base units. */
-  minAmountOut: string
-  route: string[]
-  hops: number
-  slippage: number
-}
-
-export type SwapResponse =
-  | { ok: true; plan: SwapPlan }
-  | { ok: false; error: string }

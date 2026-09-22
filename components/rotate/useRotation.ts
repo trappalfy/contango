@@ -1,17 +1,42 @@
 'use client'
 
 import { useCallback, useRef, useState } from 'react'
-import { decodeEventLog, parseAbiItem, parseUnits, formatUnits, type Address, type Hex } from 'viem'
+import {
+  decodeEventLog,
+  formatUnits,
+  maxUint256,
+  parseAbiItem,
+  parseUnits,
+  type Address,
+  type Hex,
+} from 'viem'
 import { useAccount, useConfig } from 'wagmi'
-import { readContract, sendTransaction, waitForTransactionReceipt, writeContract } from 'wagmi/actions'
+import {
+  readContract,
+  sendTransaction,
+  signTypedData,
+  waitForTransactionReceipt,
+  writeContract,
+} from 'wagmi/actions'
 import { robinhoodChain } from '@/lib/chain'
 import { TOKENS, erc20Abi, type TokenSymbol } from '@/lib/tokens'
 import { classifyError, type TxPhase } from '@/lib/swap/execution'
-import type { SwapPlan, SwapResponse } from '@/lib/swap/types'
+import { V4 } from '@/lib/v4/config'
+import {
+  MAX_UINT160,
+  buildPermitSingle,
+  buildRotationCall,
+  permit2Abi,
+  permit2Domain,
+  permit2Types,
+} from '@/lib/v4/router'
 
 const transferEvent = parseAbiItem(
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 )
+
+/** A permit with less than this left to run is treated as spent. */
+const EXPIRY_MARGIN_SECONDS = 5 * 60
 
 export type StartArgs = {
   from: TokenSymbol
@@ -19,23 +44,23 @@ export type StartArgs = {
   amount: string
   /** Tolerance in percent, as the form presents it. */
   slippage: number
-  /** The output the person was looking at when they committed, in tokens. */
-  expectedOut: string | null
+  /** Quoted output in base units, from the routed quote on screen. */
+  expectedOutWei: string | null
   /** Called once the run reaches a terminal phase, so callers can notify. */
   onSettled?: (phase: TxPhase) => void
 }
 
 /**
- * Drives a rotation from plan to receipt.
+ * Drives a rotation from quote to receipt.
  *
- * The sequence is: ask the server for executable calldata, make sure the
- * aggregator's spender can move the input token, send the swap, then read back
- * what actually arrived rather than reporting what was promised.
+ * Tokens reach the router through Permit2, which splits permission in two: a
+ * single lifetime approval from the token to Permit2, then a signature naming
+ * the router. The approval is a transaction and happens once ever; the
+ * signature is free, lasts thirty days, and travels inside the swap. So the
+ * first rotation costs two sends and every one after it costs one.
  *
- * Allowance is granted for exactly the amount being rotated. An unlimited
- * approval would spare the occasional second signature, but it leaves a
- * standing claim on someone's position in a contract this app does not
- * control, and that is not a trade worth making for one click.
+ * Nothing is built on the server. The calldata is pure encoding over public
+ * addresses, so it is assembled here where it can be read.
  */
 export function useRotation() {
   const [phase, setPhase] = useState<TxPhase>({ kind: 'idle' })
@@ -49,7 +74,7 @@ export function useRotation() {
   }, [])
 
   const start = useCallback(
-    async ({ from, to, amount, slippage, expectedOut, onSettled }: StartArgs) => {
+    async ({ from, to, amount, slippage, expectedOutWei, onSettled }: StartArgs) => {
       const id = ++runId.current
       const settle = (next: TxPhase) => {
         // A cancelled or superseded run must never write over a newer one.
@@ -62,71 +87,37 @@ export function useRotation() {
         settle({ kind: 'failed', reason: 'unknown', detail: 'No account connected.' })
         return
       }
+      if (!expectedOutWei) {
+        settle({ kind: 'failed', reason: 'unknown', detail: 'No routed quote to execute.' })
+        return
+      }
 
       const token = TOKENS[from]
       const target = TOKENS[to]
-      const value = parseUnits(amount, token.decimals)
+      const amountIn = parseUnits(amount, token.decimals)
+      const quoted = BigInt(expectedOutWei)
+      const minOut = quoted - (quoted * BigInt(Math.round(slippage * 100))) / 10_000n
 
       try {
-        /* --- 1. the plan ------------------------------------------------ */
+        /* --- 1. the token must trust Permit2, once ever ------------------ */
         settle({ kind: 'permit' })
 
-        const response = await fetch('/api/swap', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ from, to, amount, wallet: address, slippage }),
-        })
-        const payload = (await response.json()) as SwapResponse
-
-        if (!payload.ok) {
-          settle({
-            kind: 'failed',
-            reason: response.status === 501 ? 'router-not-configured' : 'unknown',
-            detail: payload.error,
-          })
-          return
-        }
-
-        const plan: SwapPlan = payload.plan
-
-        /* --- 1b. did the price move under them? -------------------------- */
-        //
-        // The quote on screen was priced seconds ago; this plan is priced now.
-        // Slippage protects the transaction once it is sent, but it does not
-        // protect someone from signing a materially worse trade than the one
-        // they read. So the gap is checked before the wallet ever opens.
-        if (expectedOut) {
-          const promised = parseUnits(expectedOut, target.decimals)
-          const actual = BigInt(plan.amountOut)
-          const floor = promised - (promised * BigInt(Math.round(slippage * 100))) / 10_000n
-
-          if (promised > 0n && actual < floor) {
-            settle({
-              kind: 'failed',
-              reason: 'quote-moved',
-              detail: `Quoted ${expectedOut}, routable ${formatUnits(actual, target.decimals)}.`,
-            })
-            return
-          }
-        }
-
-        /* --- 2. allowance ----------------------------------------------- */
-        const allowance = (await readContract(config, {
+        const tokenAllowance = (await readContract(config, {
           address: token.address,
           abi: erc20Abi,
           functionName: 'allowance',
-          args: [address, plan.spender],
+          args: [address, V4.permit2 as Address],
           chainId: robinhoodChain.id,
         })) as bigint
 
-        if (allowance < value) {
+        if (tokenAllowance < amountIn) {
           settle({ kind: 'approve' })
 
           const approvalHash = await writeContract(config, {
             address: token.address,
             abi: erc20Abi,
             functionName: 'approve',
-            args: [plan.spender, value],
+            args: [V4.permit2 as Address, maxUint256],
             chainId: robinhoodChain.id,
           })
 
@@ -138,18 +129,51 @@ export function useRotation() {
           })
 
           if (approval.status === 'reverted') {
-            settle({ kind: 'failed', reason: 'reverted', hash: approvalHash, detail: 'The approval reverted.' })
+            settle({
+              kind: 'failed',
+              reason: 'reverted',
+              hash: approvalHash,
+              detail: 'The approval to Permit2 reverted.',
+            })
             return
           }
+        }
+
+        /* --- 2. Permit2 must name the router ---------------------------- */
+        const [permitAmount, expiration, nonce] = (await readContract(config, {
+          address: V4.permit2 as Address,
+          abi: permit2Abi,
+          functionName: 'allowance',
+          args: [address, token.address, V4.universalRouter as Address],
+          chainId: robinhoodChain.id,
+        })) as [bigint, number, number]
+
+        const now = Math.floor(Date.now() / 1000)
+        const standing =
+          permitAmount >= amountIn && Number(expiration) > now + EXPIRY_MARGIN_SECONDS
+
+        let permit: { single: ReturnType<typeof buildPermitSingle>; signature: Hex } | undefined
+
+        if (!standing) {
+          const single = buildPermitSingle(token.address, Number(nonce))
+          const signature = await signTypedData(config, {
+            domain: permit2Domain,
+            types: permit2Types,
+            primaryType: 'PermitSingle',
+            message: single,
+          })
+          permit = { single, signature }
         }
 
         /* --- 3. the swap ------------------------------------------------ */
         settle({ kind: 'swap' })
 
+        const call = buildRotationCall({ from, to, amountIn, minAmountOut: minOut, permit })
+
         const hash = await sendTransaction(config, {
-          to: plan.to,
-          data: plan.data,
-          value: BigInt(plan.value),
+          to: call.to,
+          data: call.data,
+          value: call.value,
           chainId: robinhoodChain.id,
         })
 
@@ -165,7 +189,7 @@ export function useRotation() {
           return
         }
 
-        /* --- 4. what actually arrived ------------------------------------ */
+        /* --- 4. what actually arrived ----------------------------------- */
         settle({
           kind: 'confirmed',
           hash,
@@ -215,3 +239,5 @@ function receivedAmount(
 
   return total > 0n ? formatUnits(total, decimals) : null
 }
+
+export { MAX_UINT160 }
