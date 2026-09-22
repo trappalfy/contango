@@ -175,8 +175,9 @@ export function RatioChart({ pollMs = 60_000 }: { pollMs?: number }) {
       {!failed && samples.length < 2 && (
         <div style={{ marginTop: 20 }}>
           <p style={{ fontSize: 13, lineHeight: 1.6, color: 'rgba(255,255,255,0.62)' }}>
-            Collecting. This series does not exist anywhere to be bought — it is recorded here, one
-            sample a minute, starting from when the server came up.
+            Collecting. This series does not exist anywhere to be bought — it is read back from the
+            price each swap on the two pools executed at, and topped up live from the quote feed.
+            Nothing is showing yet, which means the chain query has not returned.
           </p>
           <p className="font-mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', marginTop: 10 }}>
             {samples.length} sample{samples.length === 1 ? '' : 's'} so far

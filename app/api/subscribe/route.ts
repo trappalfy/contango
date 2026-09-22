@@ -77,7 +77,23 @@ export async function POST(request: Request) {
     await write(records)
 
     return NextResponse.json({ ok: true, status: 'added' as const })
-  } catch {
+  } catch (error) {
+    // A read-only filesystem is the normal case on a serverless host, and it
+    // will not clear up on its own. Telling someone to "try again shortly"
+    // would send them back to a form that can never succeed.
+    const code = (error as { code?: string }).code
+    if (code === 'EROFS' || code === 'EACCES' || code === 'EPERM') {
+      console.error('subscribe: store is not writable on this deployment', error)
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'This deployment cannot store signups. Nothing was saved — that is a fault on our side, not yours.',
+        },
+        { status: 501 },
+      )
+    }
+
     return NextResponse.json(
       { ok: false, error: 'Could not record that just now. Try again shortly.' },
       { status: 503 },

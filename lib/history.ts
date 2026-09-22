@@ -1,15 +1,21 @@
 import { toNumber, type Dec } from './decimal'
 
 /**
- * Ratio history.
+ * Ratio history, live half.
  *
  * Robinhood's feed has no history in it, and no market-data provider sells the
  * overnight and weekend hours when these tokens keep trading and the exchange
- * does not. So the only way to own that series is to record it.
+ * does not.
  *
- * This is a process-local ring buffer: real observations, but they die with the
- * server. Production needs a table — the shape below is deliberately the shape
- * of a row, so moving it to Postgres is a swap of `push` and `series`.
+ * This is a process-local ring buffer, so it dies with the server — which on a
+ * serverless host means constantly. That used to be the whole series; it is now
+ * only the recent, fine-grained end of it. The durable part comes from
+ * `./chain-history`, which reconstructs the series from the price every swap
+ * executed at, and needs no storage of ours at all.
+ *
+ * What this buffer still adds is resolution between trades: it samples the
+ * quote feed whether or not anyone traded, which the chain by definition
+ * cannot.
  */
 export type Sample = {
   /** Unix milliseconds. */
